@@ -115,7 +115,7 @@ Click a strip to send that design directly to the glasses.
 
 The **Biblioteca** view works as a simple custom-design remote:
 
-- **Actualizar lista** refreshes the saved custom list in the interface.
+- Opening **Biblioteca** refreshes the saved custom list automatically.
 - Clicking a strip sends that single design as a static DIY frame using
   `DATS`/`DATCP`.
 - It intentionally does not use `MANY`, because hardware testing showed that

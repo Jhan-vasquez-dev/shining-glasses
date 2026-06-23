@@ -34,7 +34,6 @@ const elements = {
   importDesign: document.querySelector("#import-design"),
   importDesignFile: document.querySelector("#import-design-file"),
   stripLibrary: document.querySelector("#strip-library"),
-  prepareLibrary: document.querySelector("#prepare-library"),
   preview: document.querySelector("#preview"),
   ledGrid: document.querySelector("#led-grid"),
   sendImage: document.querySelector("#send-image"),
@@ -890,15 +889,6 @@ async function uploadFrame(frame) {
   }
 }
 
-async function prepareLibrary() {
-  const designs = await readLibrary();
-  renderStripLibrary(designs);
-  elements.status.textContent = designs.length
-    ? `Biblioteca actualizada: ${designs.length} diseños custom`
-    : "No hay diseños guardados";
-  log(`Biblioteca custom actualizada en la interfaz: ${designs.length} diseños`);
-}
-
 async function onImageSelected(event) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
@@ -982,9 +972,6 @@ elements.importDesignFile.addEventListener("change", (event) => {
   const file = event.target.files && event.target.files[0];
   if (file) importDesignFile(file);
   event.target.value = "";
-});
-elements.prepareLibrary.addEventListener("click", () => {
-  prepareLibrary().catch((error) => log(`ERROR ${error.message}`));
 });
 window.addEventListener("pointerup", () => {
   isPointerDown = false;

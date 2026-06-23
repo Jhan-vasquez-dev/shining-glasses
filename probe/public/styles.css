@@ -168,25 +168,6 @@ button:disabled {
   background: rgba(5, 18, 20, .86);
 }
 
-.preload-card {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  border: 1px dashed rgba(0, 230, 223, .32);
-  border-radius: 18px;
-  background: rgba(5, 18, 20, .72);
-}
-
-.preload-card h3 {
-  margin: 0;
-}
-
-.preload-card p {
-  margin: 4px 0 0;
-  color: #8fb0b2;
-  font-size: .92rem;
-}
-
 .library-hero h2 {
   margin: .15em 0;
   font-size: clamp(1.8rem, 9vw, 2.8rem);
@@ -252,10 +233,12 @@ button:disabled {
 
 .empty-state {
   margin: 0;
-  padding: 16px;
+  padding: 24px 18px;
   border: 1px dashed #244d50;
-  border-radius: 14px;
+  border-radius: 18px;
+  background: rgba(5, 18, 20, .72);
   color: #8fb0b2;
+  text-align: center;
 }
 
 .controls {

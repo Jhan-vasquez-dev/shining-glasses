@@ -13,8 +13,8 @@
       <p class="intro">Diseña, guarda y envía patrones pixel art exactos a las gafas.</p>
 
       <nav class="view-tabs" aria-label="Vistas principales">
-        <button id="show-editor" type="button" aria-pressed="true"><span class="icon">✎</span> Editor</button>
-        <button id="show-library" type="button" aria-pressed="false"><span class="icon">▤</span> Biblioteca</button>
+        <button id="show-editor" type="button" aria-pressed="false"><span class="icon">✎</span> Editor</button>
+        <button id="show-library" type="button" aria-pressed="true"><span class="icon">▤</span> Biblioteca</button>
       </nav>
 
       <section class="connection-card">
@@ -25,7 +25,7 @@
         <button id="connect" class="primary-action"><span class="icon">●</span> Conectar gafas</button>
       </section>
 
-      <section id="editor-view" class="app-view workspace" aria-label="Editor de patrones LED">
+      <section id="editor-view" class="app-view workspace is-hidden" aria-label="Editor de patrones LED">
         <aside class="side-panel">
           <section class="panel-card">
             <h2><span class="icon">↥</span> Importar</h2>
@@ -132,10 +132,12 @@
 
             <button id="send-image" class="send-action" disabled><span class="icon">↯</span> Enviar a gafas</button>
           </div>
+
+          <pre id="log" aria-label="Registro"></pre>
         </section>
       </section>
 
-      <section id="library-view" class="app-view library-view is-hidden" aria-label="Biblioteca rápida">
+      <section id="library-view" class="app-view library-view" aria-label="Biblioteca rápida">
         <div class="library-phone">
           <header class="library-hero">
             <p class="eyebrow">Control remoto</p>
@@ -143,20 +145,9 @@
             <p>Toca una cinta guardada para enviarla directo a las gafas.</p>
           </header>
 
-          <section class="preload-card" aria-label="Preparar biblioteca custom">
-            <div>
-              <h3>Biblioteca lista</h3>
-              <p>Actualiza tus diseños guardados para usarlos como control remoto.</p>
-            </div>
-
-            <button id="prepare-library" type="button"><span class="icon">⇪</span> Actualizar lista</button>
-          </section>
-
           <div id="strip-library" class="strip-library"></div>
         </div>
       </section>
-
-      <pre id="log" aria-label="Registro"></pre>
     </main>
     <script type="module" src="app.js"></script>
   </body>
