@@ -5,6 +5,11 @@ const NOTIFY_UUID = "d44bc439-abfd-45a2-b575-925416129601";
 
 const elements = {
   connect: document.querySelector("#connect"),
+  connectionCard: document.querySelector(".connection-card"),
+  connectionLabel: document.querySelector("#connection-label"),
+  connectionModal: document.querySelector("#connection-modal"),
+  closeConnectionModal: document.querySelector("#close-connection-modal"),
+  modalConnect: document.querySelector("#modal-connect"),
   showEditor: document.querySelector("#show-editor"),
   showLibrary: document.querySelector("#show-library"),
   editorView: document.querySelector("#editor-view"),
@@ -56,6 +61,7 @@ let redoStack = [];
 let libraryCache = [];
 let sharedLibraryAvailable = false;
 let sharedLibraryChecked = false;
+let connectedDeviceName = "";
 
 const DISPLAY_WIDTH = 36;
 const DISPLAY_HEIGHT = 12;
@@ -66,6 +72,40 @@ function log(message) {
   const timestamp = new Date().toLocaleTimeString();
   elements.log.textContent += `[${timestamp}] ${message}\n`;
   elements.log.scrollTop = elements.log.scrollHeight;
+}
+
+function setConnectionState(state, message) {
+  elements.connectionCard.classList.toggle("is-connected", state === "connected");
+  elements.connectionCard.classList.toggle("is-connecting", state === "connecting");
+  elements.status.textContent = message;
+  elements.connectionLabel.textContent = state === "connected"
+    ? "Conectadas"
+    : state === "connecting"
+      ? "Conectando"
+      : "Desconectadas";
+  elements.connect.disabled = state === "connecting";
+}
+
+function openConnectionModal() {
+  elements.connectionModal.classList.remove("is-hidden");
+}
+
+function closeConnectionModal() {
+  elements.connectionModal.classList.add("is-hidden");
+}
+
+function isConnected() {
+  return Boolean(commandCharacteristic && dataCharacteristic && notifyCharacteristic);
+}
+
+async function handleConnectRequest() {
+  try {
+    await connect();
+    closeConnectionModal();
+  } catch (error) {
+    setConnectionState("disconnected", "Gafas sin conectar");
+    log(`ERROR ${error.message}`);
+  }
 }
 
 function showView(view) {
@@ -138,6 +178,7 @@ async function onNotification(event) {
 
 async function connect() {
   if (!navigator.bluetooth) throw new Error("Web Bluetooth no está disponible en este navegador");
+  setConnectionState("connecting", "Buscando gafas...");
   device = await navigator.bluetooth.requestDevice({
     filters: [{ namePrefix: "GLASSES-" }],
     optionalServices: [SERVICE_UUID],
@@ -152,11 +193,16 @@ async function connect() {
   await notifyCharacteristic.startNotifications();
   notifyCharacteristic.addEventListener("characteristicvaluechanged", onNotification);
   device.addEventListener("gattserverdisconnected", () => {
-    elements.status.textContent = "Desconectado";
-    elements.sendImage.disabled = true;
+    connectedDeviceName = "";
+    commandCharacteristic = undefined;
+    dataCharacteristic = undefined;
+    notifyCharacteristic = undefined;
+    setConnectionState("disconnected", "Gafas desconectadas");
+    updateSendState();
   });
-  elements.status.textContent = `Conectado: ${device.name}`;
-  elements.sendImage.disabled = getLedPixels().length === 0;
+  connectedDeviceName = device.name || "GLASSES";
+  setConnectionState("connected", `Conectadas a ${connectedDeviceName}`);
+  updateSendState();
   log(`Conectado a ${device.name}`);
 }
 
@@ -494,15 +540,52 @@ async function renderStripLibrary(designs) {
     canvas.height = 72;
     renderLedCanvas(canvas, designToPixels(design));
 
+    const meta = document.createElement("div");
+    meta.className = "strip-meta";
+
     const label = document.createElement("span");
+    label.className = "strip-label";
     label.textContent = design.name;
 
+    const feedback = document.createElement("span");
+    feedback.className = "strip-feedback";
+    feedback.textContent = "Tocar para enviar";
+
+    meta.appendChild(label);
+    meta.appendChild(feedback);
+
     item.appendChild(canvas);
-    item.appendChild(label);
-    item.addEventListener("click", () => sendDesign(design).catch((error) => {
-      elements.status.textContent = "El envío falló";
-      log(`ERROR ${error.message}`);
-    }));
+    item.appendChild(meta);
+    item.addEventListener("click", () => {
+      if (!isConnected()) {
+        openConnectionModal();
+        return;
+      }
+      item.classList.remove("is-sent", "is-error");
+      item.classList.add("is-sending");
+      item.disabled = true;
+      feedback.textContent = "Enviando...";
+      sendDesign(design)
+        .then(() => {
+          item.classList.remove("is-sending");
+          item.classList.add("is-sent");
+          feedback.textContent = "Listo";
+          window.setTimeout(() => {
+            item.classList.remove("is-sent");
+            feedback.textContent = "Tocar para enviar";
+          }, 1800);
+        })
+        .catch((error) => {
+          item.classList.remove("is-sending");
+          item.classList.add("is-error");
+          feedback.textContent = "Error";
+          elements.status.textContent = "El envío falló";
+          log(`ERROR ${error.message}`);
+        })
+        .finally(() => {
+          item.disabled = false;
+        });
+    });
     elements.stripLibrary.appendChild(item);
   }
 }
@@ -614,10 +697,7 @@ function orientPixels(pixels) {
 
 function updateSendState() {
   const count = getLedPixels().length;
-  elements.sendImage.disabled = !commandCharacteristic || count === 0;
-  elements.status.textContent = count > 0
-    ? `Patrón listo: ${count} LEDs encendidos`
-    : "Grid vacío";
+  elements.sendImage.disabled = count === 0;
 }
 
 function renderGrid() {
@@ -902,6 +982,10 @@ async function sendCurrentImage() {
   if (!pixels.length) {
     throw new Error("Primero importa o dibuja un patrón con LEDs visibles");
   }
+  if (!isConnected()) {
+    openConnectionModal();
+    return;
+  }
   elements.sendImage.disabled = true;
   try {
     elements.status.textContent = "Enviando patrón...";
@@ -914,6 +998,10 @@ async function sendCurrentImage() {
 }
 
 async function sendDesign(design) {
+  if (!isConnected()) {
+    openConnectionModal();
+    return;
+  }
   const pixels = designToPixels(design);
   if (!pixels.length) throw new Error(`El diseño "${design.name}" está vacío`);
 
@@ -928,7 +1016,12 @@ renderPreview([]);
 renderLibrary().catch((error) => log(`ERROR ${error.message}`));
 updateHistoryButtons();
 
-elements.connect.addEventListener("click", () => connect().catch((error) => log(`ERROR ${error.message}`)));
+elements.connect.addEventListener("click", handleConnectRequest);
+elements.modalConnect.addEventListener("click", handleConnectRequest);
+elements.closeConnectionModal.addEventListener("click", closeConnectionModal);
+elements.connectionModal.addEventListener("click", (event) => {
+  if (event.target === elements.connectionModal) closeConnectionModal();
+});
 elements.showEditor.addEventListener("click", () => showView("editor"));
 elements.showLibrary.addEventListener("click", () => showView("library"));
 elements.imageFile.addEventListener("change", (event) => onImageSelected(event).catch((error) => log(`ERROR ${error.message}`)));

@@ -3,6 +3,8 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #050b0c;
   color: #e9ffff;
+  --connected: #22c55e;
+  --connected-soft: rgba(34, 197, 94, .12);
 }
 
 body {
@@ -20,10 +22,44 @@ main {
   padding: 32px 0;
 }
 
+.app-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 18px;
+}
+
+.brand-mark {
+  display: grid;
+  grid-template-columns: repeat(3, 10px);
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid rgba(0, 230, 223, .3);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(0, 230, 223, .14), rgba(128, 0, 255, .12));
+  box-shadow: 0 0 34px rgba(0, 230, 223, .12);
+}
+
+.brand-mark span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #123133;
+  box-shadow: inset 0 0 0 1px rgba(0, 230, 223, .18);
+}
+
+.brand-mark span:nth-child(1),
+.brand-mark span:nth-child(3),
+.brand-mark span:nth-child(5) {
+  background: #00e6df;
+  box-shadow: 0 0 16px rgba(0, 230, 223, .9);
+}
+
 .eyebrow {
   color: #00e6df;
   letter-spacing: .14em;
   text-transform: uppercase;
+  margin: 0;
 }
 
 h1 {
@@ -78,11 +114,59 @@ button:disabled {
 
 .connection-card {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 18px;
   margin: 24px 0;
   padding: 18px;
+}
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 85, 216, .34);
+  border-radius: 999px;
+  color: #ffc9f2;
+  background: rgba(255, 85, 216, .08);
+  font-size: .88rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.connection-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff55d8;
+  box-shadow: 0 0 14px rgba(255, 85, 216, .7);
+}
+
+.connection-card.is-connected {
+  border-color: rgba(34, 197, 94, .5);
+}
+
+.connection-card.is-connected .connection-badge {
+  border-color: rgba(34, 197, 94, .5);
+  color: #d7ffe4;
+  background: var(--connected-soft);
+}
+
+.connection-card.is-connected .connection-dot {
+  background: var(--connected);
+  box-shadow: 0 0 16px rgba(34, 197, 94, .9);
+}
+
+.connection-card.is-connecting .connection-badge {
+  border-color: rgba(255, 211, 77, .42);
+  color: #ffe9a6;
+  background: rgba(255, 211, 77, .08);
+}
+
+.connection-card.is-connecting .connection-dot {
+  background: #ffd34d;
+  box-shadow: 0 0 16px rgba(255, 211, 77, .8);
 }
 
 .connection-card h2,
@@ -211,11 +295,34 @@ button:disabled {
   text-align: left;
   border-color: rgba(0, 230, 223, .28);
   background: #061113;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease, box-shadow .18s ease;
 }
 
 .strip-item:hover {
   border-color: #00e6df;
   background: #082124;
+}
+
+.strip-item:disabled {
+  opacity: 1;
+  cursor: wait;
+}
+
+.strip-item.is-sending {
+  border-color: rgba(255, 211, 77, .7);
+  background: rgba(255, 211, 77, .08);
+  transform: translateY(-1px);
+}
+
+.strip-item.is-sent {
+  border-color: rgba(0, 230, 223, .85);
+  background: rgba(0, 230, 223, .1);
+  box-shadow: 0 0 0 1px rgba(0, 230, 223, .18), 0 18px 42px rgba(0, 230, 223, .08);
+}
+
+.strip-item.is-error {
+  border-color: rgba(255, 85, 216, .75);
+  background: rgba(255, 85, 216, .08);
 }
 
 .strip-item canvas {
@@ -226,9 +333,34 @@ button:disabled {
   background: #020606;
 }
 
-.strip-item span {
+.strip-label {
   color: #d8ffff;
   font-weight: 700;
+}
+
+.strip-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.strip-feedback {
+  color: #8fb0b2;
+  font-size: .82rem;
+  font-weight: 700;
+}
+
+.strip-item.is-sending .strip-feedback {
+  color: #ffe9a6;
+}
+
+.strip-item.is-sent .strip-feedback {
+  color: #00e6df;
+}
+
+.strip-item.is-error .strip-feedback {
+  color: #ff9be5;
 }
 
 .empty-state {
@@ -384,6 +516,74 @@ input[type="color"] {
   color: #ff55d8;
 }
 
+.connection-card.is-connected #status {
+  color: var(--connected);
+}
+
+.connection-card.is-connecting #status {
+  color: #ffd34d;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, .72);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  position: relative;
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid rgba(0, 230, 223, .34);
+  border-radius: 22px;
+  background: #061113;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .55);
+}
+
+.modal-card h2 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.modal-card p {
+  margin: 0;
+  color: #a8c7c9;
+  line-height: 1.5;
+}
+
+.modal-card .primary-action {
+  width: 100%;
+}
+
+.modal-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #061113;
+  background: var(--connected);
+  box-shadow: 0 0 28px rgba(34, 197, 94, .55);
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  color: #8fb0b2;
+}
+
 #log {
   min-height: 96px;
   max-height: 220px;
@@ -399,6 +599,18 @@ input[type="color"] {
 }
 
 @media (max-width: 900px) {
+  main {
+    padding-top: 24px;
+  }
+
+  .app-header {
+    align-items: start;
+  }
+
+  h1 {
+    font-size: clamp(2.25rem, 13vw, 4rem);
+  }
+
   .view-tabs {
     width: 100%;
   }
@@ -410,6 +622,11 @@ input[type="color"] {
   .connection-card,
   .workspace {
     grid-template-columns: 1fr;
+  }
+
+  .connection-badge,
+  .primary-action {
+    width: 100%;
   }
 
   .editor-header {
@@ -425,7 +642,7 @@ input[type="color"] {
     grid-template-columns: 1fr;
   }
 
-  .strip-item span {
+  .strip-label {
     min-width: 0;
   }
 }
