@@ -1,0 +1,7 @@
+captures/
+tools/runtime/
+tools/jadx/
+*.jar
+.DS_Store
+node_modules/
+.env

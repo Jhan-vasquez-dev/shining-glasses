@@ -1,0 +1,14 @@
+{
+  "name": "shining-glasses-probe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web editor and BLE uploader for 36x12 Shining Glasses designs.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

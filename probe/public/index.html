@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shining Glasses BLE Probe</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">36 × 12 RGB</p>
+      <h1>Editor LED Glasses</h1>
+      <p class="intro">Diseña, guarda y envía patrones pixel art exactos a las gafas.</p>
+
+      <nav class="view-tabs" aria-label="Vistas principales">
+        <button id="show-editor" type="button" aria-pressed="true"><span class="icon">✎</span> Editor</button>
+        <button id="show-library" type="button" aria-pressed="false"><span class="icon">▤</span> Biblioteca</button>
+      </nav>
+
+      <section class="connection-card">
+        <div>
+          <h2>Conexión</h2>
+          <p id="status" role="status">Sin conexión</p>
+        </div>
+        <button id="connect" class="primary-action"><span class="icon">●</span> Conectar gafas</button>
+      </section>
+
+      <section id="editor-view" class="app-view workspace" aria-label="Editor de patrones LED">
+        <aside class="side-panel">
+          <section class="panel-card">
+            <h2><span class="icon">↥</span> Importar</h2>
+            <label class="field">
+              Imagen pixel art
+              <input id="image-file" type="file" accept="image/*">
+            </label>
+
+            <label class="field">
+              Modo
+              <select id="import-mode">
+                <option value="cells">Exacto por celdas</option>
+                <option value="exact">Redimensionar 36×12</option>
+                <option value="contain">Referencia completa</option>
+                <option value="cover">Referencia recortada</option>
+                <option value="stretch">Referencia estirada</option>
+              </select>
+            </label>
+
+            <div class="compact-controls">
+              <label class="field">
+                Umbral oscuro
+                <input id="brightness-threshold" type="range" min="0" max="255" value="18">
+              </label>
+
+              <label class="field">
+                Cobertura
+                <input id="coverage-threshold" type="range" min="1" max="100" value="35">
+              </label>
+            </div>
+
+            <div class="color-row">
+              <label class="checkbox-field">
+                <input id="use-solid-color" type="checkbox" checked>
+                Color fijo
+              </label>
+
+              <label class="color-field">
+                <span>LED</span>
+                <input id="solid-color" type="color" value="#8000ff">
+              </label>
+            </div>
+          </section>
+
+          <section class="panel-card library" aria-label="Biblioteca de diseños">
+            <h2><span class="icon">▣</span> Biblioteca</h2>
+            <label class="field">
+              Nombre del diseño
+              <input id="design-name" type="text" placeholder="mi diseño">
+            </label>
+
+            <label class="field">
+              Diseños guardados
+              <select id="saved-designs"></select>
+            </label>
+
+            <div class="button-grid">
+              <button id="save-design" type="button"><span class="icon">＋</span> Guardar</button>
+              <button id="load-design" type="button"><span class="icon">↧</span> Cargar</button>
+              <button id="delete-design" type="button"><span class="icon">×</span> Borrar</button>
+              <button id="export-design" type="button"><span class="icon">↗</span> Exportar</button>
+              <button id="import-design" type="button"><span class="icon">↙</span> Importar</button>
+              <input id="import-design-file" class="hidden-file" type="file" accept="application/json,.json">
+            </div>
+          </section>
+        </aside>
+
+        <section class="editor-panel">
+          <div class="preview-card">
+            <div>
+              <h2>Vista previa</h2>
+              <p>Simulación de los LEDs encendidos en las gafas.</p>
+            </div>
+            <canvas id="preview" width="360" height="72" aria-label="Previsualización 36 por 12"></canvas>
+          </div>
+
+          <div class="editor-card">
+            <div class="editor-header">
+              <div>
+                <h2>Editar pixeles</h2>
+                <p>36 columnas × 12 filas</p>
+              </div>
+
+              <div class="tool-group" aria-label="Herramientas de pintar y borrar">
+                <button id="tool-paint" type="button" aria-pressed="true"><span class="icon">●</span> Pintar</button>
+                <button id="tool-erase" type="button" aria-pressed="false"><span class="icon">○</span> Borrar</button>
+                <button id="undo" type="button" disabled><span class="icon">↶</span> Undo</button>
+                <button id="redo" type="button" disabled><span class="icon">↷</span> Redo</button>
+              </div>
+            </div>
+
+            <div class="led-grid-wrap">
+              <div id="led-grid" class="led-grid" aria-label="Editor de 36 por 12 LEDs"></div>
+            </div>
+
+            <div class="toolbar secondary-tools" aria-label="Herramientas de pixel art">
+              <button id="mirror-horizontal" type="button"><span class="icon">⇄</span> Espejo</button>
+              <button id="move-left" type="button"><span class="icon">←</span> Izq.</button>
+              <button id="move-right" type="button"><span class="icon">→</span> Der.</button>
+              <button id="move-up" type="button"><span class="icon">↑</span> Arriba</button>
+              <button id="move-down" type="button"><span class="icon">↓</span> Abajo</button>
+              <button id="clear-grid" type="button"><span class="icon">×</span> Limpiar</button>
+            </div>
+
+            <button id="send-image" class="send-action" disabled><span class="icon">↯</span> Enviar a gafas</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="library-view" class="app-view library-view is-hidden" aria-label="Biblioteca rápida">
+        <div class="library-phone">
+          <header class="library-hero">
+            <p class="eyebrow">Control remoto</p>
+            <h2>Biblioteca custom</h2>
+            <p>Toca una cinta guardada para enviarla directo a las gafas.</p>
+          </header>
+
+          <section class="preload-card" aria-label="Preparar biblioteca custom">
+            <div>
+              <h3>Biblioteca lista</h3>
+              <p>Actualiza tus diseños guardados para usarlos como control remoto.</p>
+            </div>
+
+            <button id="prepare-library" type="button"><span class="icon">⇪</span> Actualizar lista</button>
+          </section>
+
+          <div id="strip-library" class="strip-library"></div>
+        </div>
+      </section>
+
+      <pre id="log" aria-label="Registro"></pre>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
