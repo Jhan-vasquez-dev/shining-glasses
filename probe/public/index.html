@@ -18,11 +18,17 @@
           <h1>Glow Remote</h1>
           <p class="intro">Biblioteca y editor para controlar tus gafas LED.</p>
         </div>
+        <label class="brightness-control">
+          <span>Brillo LED</span>
+          <strong id="led-brightness-value">80%</strong>
+          <input id="led-brightness" type="range" min="1" max="100" value="80">
+        </label>
       </header>
 
       <nav class="view-tabs" aria-label="Vistas principales">
-        <button id="show-editor" type="button" aria-pressed="false"><span class="icon">✎</span> Editor</button>
         <button id="show-library" type="button" aria-pressed="true"><span class="icon">▤</span> Biblioteca</button>
+        <button id="show-editor" type="button" aria-pressed="false"><span class="icon">✎</span> Editor</button>
+        <button id="show-animation" type="button" aria-pressed="false"><span class="icon">▶</span> Animación</button>
       </nav>
 
       <section class="connection-card">
@@ -154,10 +160,74 @@
           <header class="library-hero">
             <p class="eyebrow">Control remoto</p>
             <h2>Biblioteca custom</h2>
-            <p>Toca una cinta guardada para enviarla directo a las gafas.</p>
+            <p>Toca un diseño o una animación guardada para enviarla directo a las gafas.</p>
           </header>
 
+          <div class="library-switch" aria-label="Tipo de biblioteca">
+            <button id="show-static-library" type="button" aria-pressed="true"><span class="icon">▣</span><span id="static-library-tab-label">Estáticas (0)</span></button>
+            <button id="show-animation-library" type="button" aria-pressed="false"><span class="icon">▶</span><span id="animation-library-tab-label">Animaciones (0)</span></button>
+          </div>
+
           <div id="strip-library" class="strip-library"></div>
+        </div>
+      </section>
+
+      <section id="animation-view" class="app-view animation-view is-hidden" aria-label="Creador de animaciones custom">
+        <header class="animation-hero">
+          <div>
+            <p class="eyebrow">Timeline custom</p>
+            <h2>Crear animación</h2>
+            <p>Elige diseños en el panel izquierdo y ordénalos en una línea de tiempo horizontal.</p>
+          </div>
+          <button id="send-animation" class="send-action" type="button" disabled><span class="icon">▶</span> Enviar animación</button>
+        </header>
+
+        <div class="animation-studio">
+          <aside class="animation-source-panel">
+            <section class="animation-save-controls" aria-label="Animaciones guardadas">
+              <label class="field">
+                Nombre de animación
+                <input id="animation-name" type="text" placeholder="parpadeo rápido">
+              </label>
+              <button id="save-animation" class="primary-action" type="button"><span class="icon">＋</span> Guardar animación</button>
+              <label class="field">
+                Animaciones guardadas
+                <select id="saved-animations"></select>
+              </label>
+              <div class="animation-save-actions">
+                <button id="load-animation" type="button"><span class="icon">↧</span> Cargar</button>
+                <button id="delete-animation" type="button"><span class="icon">×</span> Borrar</button>
+              </div>
+            </section>
+
+            <section class="animation-source-card">
+              <div>
+                <h3>Diseños estáticos</h3>
+                <p>Toca un diseño para agregarlo al final de la línea de tiempo.</p>
+              </div>
+              <div id="animation-design-picker" class="animation-design-picker"></div>
+            </section>
+          </aside>
+
+          <section class="timeline-panel">
+            <div class="timeline-header">
+              <div>
+                <h3>Línea de tiempo</h3>
+                <p id="timeline-summary">0 pasos · 0 frames enviados</p>
+              </div>
+              <button id="clear-animation" type="button"><span class="icon">×</span> Limpiar</button>
+            </div>
+
+            <div id="animation-library" class="animation-library"></div>
+
+            <div class="animation-preview-card">
+              <div>
+                <h3>Preview</h3>
+                <p>Vista rápida de la animación que estás armando.</p>
+              </div>
+              <canvas id="animation-preview" width="360" height="72" aria-label="Preview de animación"></canvas>
+            </div>
+          </section>
         </div>
       </section>
     </main>

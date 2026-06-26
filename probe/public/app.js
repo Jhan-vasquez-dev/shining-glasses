@@ -10,10 +10,14 @@ const elements = {
   connectionModal: document.querySelector("#connection-modal"),
   closeConnectionModal: document.querySelector("#close-connection-modal"),
   modalConnect: document.querySelector("#modal-connect"),
+  ledBrightness: document.querySelector("#led-brightness"),
+  ledBrightnessValue: document.querySelector("#led-brightness-value"),
   showEditor: document.querySelector("#show-editor"),
   showLibrary: document.querySelector("#show-library"),
+  showAnimation: document.querySelector("#show-animation"),
   editorView: document.querySelector("#editor-view"),
   libraryView: document.querySelector("#library-view"),
+  animationView: document.querySelector("#animation-view"),
   imageFile: document.querySelector("#image-file"),
   importMode: document.querySelector("#import-mode"),
   brightnessThreshold: document.querySelector("#brightness-threshold"),
@@ -38,7 +42,22 @@ const elements = {
   exportDesign: document.querySelector("#export-design"),
   importDesign: document.querySelector("#import-design"),
   importDesignFile: document.querySelector("#import-design-file"),
+  showStaticLibrary: document.querySelector("#show-static-library"),
+  showAnimationLibrary: document.querySelector("#show-animation-library"),
+  staticLibraryTabLabel: document.querySelector("#static-library-tab-label"),
+  animationLibraryTabLabel: document.querySelector("#animation-library-tab-label"),
   stripLibrary: document.querySelector("#strip-library"),
+  animationLibrary: document.querySelector("#animation-library"),
+  timelineSummary: document.querySelector("#timeline-summary"),
+  animationPreview: document.querySelector("#animation-preview"),
+  animationName: document.querySelector("#animation-name"),
+  savedAnimations: document.querySelector("#saved-animations"),
+  saveAnimation: document.querySelector("#save-animation"),
+  loadAnimation: document.querySelector("#load-animation"),
+  deleteAnimation: document.querySelector("#delete-animation"),
+  animationDesignPicker: document.querySelector("#animation-design-picker"),
+  clearAnimation: document.querySelector("#clear-animation"),
+  sendAnimation: document.querySelector("#send-animation"),
   preview: document.querySelector("#preview"),
   ledGrid: document.querySelector("#led-grid"),
   sendImage: document.querySelector("#send-image"),
@@ -59,14 +78,25 @@ let currentStrokeKey;
 let undoStack = [];
 let redoStack = [];
 let libraryCache = [];
+let animationCache = [];
 let sharedLibraryAvailable = false;
 let sharedLibraryChecked = false;
+let sharedAnimationsAvailable = false;
+let sharedAnimationsChecked = false;
 let connectedDeviceName = "";
+let activeLibraryMode = "static";
+let animationTimeline = [];
+let animationPreviewTimer;
+let animationPreviewIndex = 0;
+let libraryAnimationPreviewTimers = [];
 
 const DISPLAY_WIDTH = 36;
 const DISPLAY_HEIGHT = 12;
 const CELL_COUNT = DISPLAY_WIDTH * DISPLAY_HEIGHT;
 const LIBRARY_STORAGE_KEY = "shiningGlassesDesigns";
+const ANIMATION_STORAGE_KEY = "shiningGlassesAnimations";
+const DEFAULT_MANY_MODE_BYTE = 0x01;
+const PREVIEW_FRAME_MS = 850;
 const HISTORY_LIMIT = 80;
 function log(message) {
   const timestamp = new Date().toLocaleTimeString();
@@ -98,6 +128,21 @@ function isConnected() {
   return Boolean(commandCharacteristic && dataCharacteristic && notifyCharacteristic);
 }
 
+function updateBrightnessLabel() {
+  elements.ledBrightnessValue.textContent = `${elements.ledBrightness.value}%`;
+}
+
+async function setLedBrightness() {
+  updateBrightnessLabel();
+  if (!isConnected()) {
+    openConnectionModal();
+    return;
+  }
+  const level = Math.max(1, Math.min(100, Number.parseInt(elements.ledBrightness.value, 10) || 80));
+  elements.status.textContent = `Brillo LED: ${level}%`;
+  await sendCommand("LIGHT", [level]);
+}
+
 async function handleConnectRequest() {
   try {
     await connect();
@@ -110,11 +155,40 @@ async function handleConnectRequest() {
 
 function showView(view) {
   const isEditor = view === "editor";
+  const isLibrary = view === "library";
+  const isAnimation = view === "animation";
   elements.editorView.classList.toggle("is-hidden", !isEditor);
-  elements.libraryView.classList.toggle("is-hidden", isEditor);
+  elements.libraryView.classList.toggle("is-hidden", !isLibrary);
+  elements.animationView.classList.toggle("is-hidden", !isAnimation);
   elements.showEditor.setAttribute("aria-pressed", isEditor ? "true" : "false");
-  elements.showLibrary.setAttribute("aria-pressed", isEditor ? "false" : "true");
-  if (!isEditor) renderStripLibrary().catch((error) => log(`ERROR ${error.message}`));
+  elements.showLibrary.setAttribute("aria-pressed", isLibrary ? "true" : "false");
+  elements.showAnimation.setAttribute("aria-pressed", isAnimation ? "true" : "false");
+  if (isLibrary) renderActiveLibrary().catch((error) => log(`ERROR ${error.message}`));
+  if (isAnimation) {
+    renderAnimationLibrary().catch((error) => log(`ERROR ${error.message}`));
+    renderSavedAnimations().catch((error) => log(`ERROR ${error.message}`));
+  } else {
+    window.clearInterval(animationPreviewTimer);
+  }
+}
+
+async function setLibraryMode(mode) {
+  activeLibraryMode = mode;
+  elements.showStaticLibrary.setAttribute("aria-pressed", mode === "static" ? "true" : "false");
+  elements.showAnimationLibrary.setAttribute("aria-pressed", mode === "animations" ? "true" : "false");
+  await renderActiveLibrary();
+}
+
+function clearLibraryAnimationPreviews() {
+  for (const timer of libraryAnimationPreviewTimers) {
+    window.clearInterval(timer);
+  }
+  libraryAnimationPreviewTimers = [];
+}
+
+function updateLibraryTabCounts(designs = libraryCache, animations = animationCache) {
+  elements.staticLibraryTabLabel.textContent = `Estáticas (${designs.length})`;
+  elements.animationLibraryTabLabel.textContent = `Animaciones (${animations.length})`;
 }
 
 function hexToBytes(hex) {
@@ -390,6 +464,19 @@ function createDesign(name) {
   };
 }
 
+function createAnimation(name) {
+  return {
+    version: 1,
+    name,
+    manyModeByte: DEFAULT_MANY_MODE_BYTE,
+    frames: animationTimeline.map((entry) => ({
+      designName: entry.designName,
+      repeat: Math.max(1, Math.min(20, entry.repeat || 1)),
+    })),
+    savedAt: new Date().toISOString(),
+  };
+}
+
 function readLocalLibrary() {
   try {
     const value = localStorage.getItem(LIBRARY_STORAGE_KEY);
@@ -401,8 +488,23 @@ function readLocalLibrary() {
   }
 }
 
+function readLocalAnimations() {
+  try {
+    const value = localStorage.getItem(ANIMATION_STORAGE_KEY);
+    const animations = value ? JSON.parse(value) : [];
+    return Array.isArray(animations) ? animations : [];
+  } catch (error) {
+    log(`ERROR animaciones locales: ${error.message}`);
+    return [];
+  }
+}
+
 function writeLocalLibrary(designs) {
   localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(designs));
+}
+
+function writeLocalAnimations(animations) {
+  localStorage.setItem(ANIMATION_STORAGE_KEY, JSON.stringify(animations));
 }
 
 async function apiRequest(path, options) {
@@ -410,6 +512,73 @@ async function apiRequest(path, options) {
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `API request failed: ${response.status}`);
   return result;
+}
+
+async function readAnimations() {
+  try {
+    const result = await apiRequest("/api/animations");
+    const animations = Array.isArray(result.animations) ? result.animations : [];
+    animationCache = animations;
+    writeLocalAnimations(animations);
+    sharedAnimationsAvailable = true;
+    sharedAnimationsChecked = true;
+    return animations;
+  } catch (error) {
+    if (!sharedAnimationsChecked && error.message !== "Shared library is not configured") {
+      log(`Animaciones compartidas no disponibles, usando local: ${error.message}`);
+    }
+    sharedAnimationsAvailable = false;
+    sharedAnimationsChecked = true;
+    animationCache = readLocalAnimations();
+    return animationCache;
+  }
+}
+
+async function saveAnimationToLibrary(animation) {
+  if (sharedAnimationsAvailable || !sharedAnimationsChecked) {
+    try {
+      const result = await apiRequest("/api/animations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(animation),
+      });
+      await readAnimations();
+      return result.animation || animation;
+    } catch (error) {
+      log(`Animación compartida no guardó, usando local: ${error.message}`);
+      sharedAnimationsAvailable = false;
+      sharedAnimationsChecked = true;
+    }
+  }
+
+  const animations = readLocalAnimations();
+  const existingIndex = animations.findIndex((item) => item.name === animation.name);
+  if (existingIndex >= 0) {
+    animations[existingIndex] = animation;
+  } else {
+    animations.push(animation);
+  }
+  animations.sort((left, right) => left.name.localeCompare(right.name));
+  writeLocalAnimations(animations);
+  animationCache = animations;
+  return animation;
+}
+
+async function deleteAnimationFromLibrary(name) {
+  if (sharedAnimationsAvailable) {
+    try {
+      await apiRequest(`/api/animations/${encodeURIComponent(name)}`, { method: "DELETE" });
+      await readAnimations();
+      return;
+    } catch (error) {
+      log(`Animación compartida no borró, usando local: ${error.message}`);
+      sharedAnimationsAvailable = false;
+    }
+  }
+
+  const animations = readLocalAnimations().filter((item) => item.name !== name);
+  writeLocalAnimations(animations);
+  animationCache = animations;
 }
 
 async function readLibrary() {
@@ -488,7 +657,10 @@ async function renderLibrary(selectedName) {
     option.value = "";
     option.textContent = "Sin diseños guardados";
     elements.savedDesigns.appendChild(option);
-    renderStripLibrary(designs);
+    updateLibraryTabCounts(designs, animationCache);
+    if (!elements.libraryView.classList.contains("is-hidden")) {
+      renderActiveLibrary().catch((error) => log(`ERROR ${error.message}`));
+    }
     return;
   }
 
@@ -500,7 +672,43 @@ async function renderLibrary(selectedName) {
   }
 
   if (selectedName) elements.savedDesigns.value = selectedName;
-  renderStripLibrary(designs);
+  updateLibraryTabCounts(designs, animationCache);
+  if (!elements.libraryView.classList.contains("is-hidden")) {
+    renderActiveLibrary().catch((error) => log(`ERROR ${error.message}`));
+  }
+}
+
+async function renderSavedAnimations(selectedName) {
+  const animations = await readAnimations();
+  elements.savedAnimations.innerHTML = "";
+  updateLibraryTabCounts(libraryCache, animations);
+
+  if (!animations.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Sin animaciones guardadas";
+    elements.savedAnimations.appendChild(option);
+    return;
+  }
+
+  for (const animation of animations) {
+    const option = document.createElement("option");
+    option.value = animation.name;
+    option.textContent = animation.name;
+    elements.savedAnimations.appendChild(option);
+  }
+
+  if (selectedName) elements.savedAnimations.value = selectedName;
+}
+
+async function renderActiveLibrary() {
+  const [designs, animations] = await Promise.all([readLibrary(), readAnimations()]);
+  updateLibraryTabCounts(designs, animations);
+  if (activeLibraryMode === "animations") {
+    await renderAnimationStripLibrary(animations);
+    return;
+  }
+  await renderStripLibrary(designs);
 }
 
 function designToPixels(design) {
@@ -517,8 +725,51 @@ function designToPixels(design) {
   return pixels;
 }
 
+async function animationToDesignSequence(animation) {
+  validateAnimation(animation);
+  const designs = libraryCache.length ? libraryCache : await readLibrary();
+  const sequence = [];
+  for (const frame of animation.frames) {
+    const design = designs.find((item) => item.name === frame.designName);
+    if (!design) throw new Error(`No se encontró el diseño "${frame.designName}"`);
+    const repeatCount = Math.max(1, Math.min(20, frame.repeat || 1));
+    for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex += 1) {
+      sequence.push(design);
+    }
+  }
+  return sequence;
+}
+
+function renderLibraryAnimationPreview(canvas, animation, designs) {
+  const sequence = [];
+  for (const frame of animation.frames) {
+    const design = designs.find((itemDesign) => itemDesign.name === frame.designName);
+    if (!design) continue;
+    const repeatCount = Math.max(1, Math.min(20, frame.repeat || 1));
+    for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex += 1) {
+      sequence.push(design);
+    }
+  }
+
+  if (!sequence.length) {
+    renderLedCanvas(canvas, []);
+    return;
+  }
+
+  let previewIndex = 0;
+  renderLedCanvas(canvas, designToPixels(sequence[previewIndex]));
+  if (sequence.length <= 1) return;
+
+  const timer = window.setInterval(() => {
+    previewIndex = (previewIndex + 1) % sequence.length;
+    renderLedCanvas(canvas, designToPixels(sequence[previewIndex]));
+  }, PREVIEW_FRAME_MS);
+  libraryAnimationPreviewTimers.push(timer);
+}
+
 async function renderStripLibrary(designs) {
   if (!designs) designs = await readLibrary();
+  clearLibraryAnimationPreviews();
   elements.stripLibrary.innerHTML = "";
 
   if (!designs.length) {
@@ -590,12 +841,363 @@ async function renderStripLibrary(designs) {
   }
 }
 
+async function renderAnimationStripLibrary(animations) {
+  if (!animations) animations = await readAnimations();
+  clearLibraryAnimationPreviews();
+  elements.stripLibrary.innerHTML = "";
+
+  if (!animations.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Guarda animaciones para enviarlas desde esta biblioteca.";
+    elements.stripLibrary.appendChild(empty);
+    return;
+  }
+
+  for (const animation of animations) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "strip-item strip-item-animation";
+    item.title = `Enviar animación ${animation.name}`;
+
+    const designs = libraryCache.length ? libraryCache : await readLibrary();
+    const canvas = document.createElement("canvas");
+    canvas.width = 360;
+    canvas.height = 72;
+    renderLibraryAnimationPreview(canvas, animation, designs);
+
+    const meta = document.createElement("div");
+    meta.className = "strip-meta";
+
+    const label = document.createElement("span");
+    label.className = "strip-label";
+    label.textContent = animation.name;
+
+    const feedback = document.createElement("span");
+    feedback.className = "strip-feedback";
+    const feedbackIcon = document.createElement("span");
+    feedbackIcon.className = "play-badge";
+    feedbackIcon.textContent = "▶";
+    feedback.appendChild(feedbackIcon);
+    feedback.appendChild(document.createTextNode("Reproducir"));
+
+    meta.appendChild(label);
+    meta.appendChild(feedback);
+    item.appendChild(canvas);
+    item.appendChild(meta);
+    item.addEventListener("click", () => {
+      if (!isConnected()) {
+        openConnectionModal();
+        return;
+      }
+      item.classList.remove("is-sent", "is-error");
+      item.classList.add("is-sending");
+      item.disabled = true;
+      feedback.textContent = "Enviando...";
+      animationToDesignSequence(animation)
+        .then((sequence) => uploadAnimation(sequence))
+        .then(() => {
+          item.classList.remove("is-sending");
+          item.classList.add("is-sent");
+          feedback.textContent = "Reproduciendo";
+          window.setTimeout(() => {
+            item.classList.remove("is-sent");
+            feedback.textContent = "";
+            const resetIcon = document.createElement("span");
+            resetIcon.className = "play-badge";
+            resetIcon.textContent = "▶";
+            feedback.appendChild(resetIcon);
+            feedback.appendChild(document.createTextNode("Reproducir"));
+          }, 1800);
+        })
+        .catch((error) => {
+          item.classList.remove("is-sending");
+          item.classList.add("is-error");
+          feedback.textContent = "Error";
+          elements.status.textContent = "La animación falló";
+          log(`ERROR ${error.message}`);
+        })
+        .finally(() => {
+          item.disabled = false;
+        });
+    });
+    elements.stripLibrary.appendChild(item);
+  }
+}
+
+function updateAnimationSendState() {
+  const frameCount = animationTimeline.reduce((total, entry) => total + Math.max(1, Math.min(20, entry.repeat || 1)), 0);
+  elements.sendAnimation.disabled = frameCount < 2;
+  elements.saveAnimation.disabled = animationTimeline.length === 0;
+  updateTimelineSummary();
+}
+
+function updateTimelineSummary() {
+  const sentFrameCount = animationTimeline.reduce((total, entry) => total + Math.max(1, Math.min(20, entry.repeat || 1)), 0);
+  elements.timelineSummary.textContent = `${animationTimeline.length} pasos · ${sentFrameCount} frames enviados`;
+}
+
+function getTimelinePreviewSequence() {
+  const sequence = [];
+  for (const entry of animationTimeline) {
+    const design = libraryCache.find((item) => item.name === entry.designName);
+    if (!design) continue;
+    const repeatCount = Math.max(1, Math.min(20, entry.repeat || 1));
+    for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex += 1) {
+      sequence.push(design);
+    }
+  }
+  return sequence;
+}
+
+function renderAnimationPreview() {
+  window.clearInterval(animationPreviewTimer);
+  const sequence = getTimelinePreviewSequence();
+  if (!sequence.length) {
+    animationPreviewIndex = 0;
+    renderLedCanvas(elements.animationPreview, []);
+    return;
+  }
+
+  animationPreviewIndex %= sequence.length;
+  renderLedCanvas(elements.animationPreview, designToPixels(sequence[animationPreviewIndex]));
+
+  if (sequence.length > 1) {
+    animationPreviewTimer = window.setInterval(() => {
+      animationPreviewIndex = (animationPreviewIndex + 1) % sequence.length;
+      renderLedCanvas(elements.animationPreview, designToPixels(sequence[animationPreviewIndex]));
+    }, PREVIEW_FRAME_MS);
+  }
+}
+
+async function renderAnimationLibrary(designs) {
+  if (!designs) designs = await readLibrary();
+  elements.animationDesignPicker.innerHTML = "";
+
+  if (!designs.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Guarda diseños para agregarlos a la línea de tiempo.";
+    elements.animationDesignPicker.appendChild(empty);
+    renderAnimationTimeline();
+    updateAnimationSendState();
+    return;
+  }
+
+  for (const design of designs) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "animation-source-item";
+    item.title = `Agregar ${design.name}`;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 360;
+    canvas.height = 72;
+    renderLedCanvas(canvas, designToPixels(design));
+
+    const label = document.createElement("span");
+    label.textContent = design.name;
+
+    item.appendChild(canvas);
+    item.appendChild(label);
+    item.addEventListener("click", () => {
+      animationTimeline.push(createTimelineEntry(design.name));
+      renderAnimationTimeline();
+    });
+    elements.animationDesignPicker.appendChild(item);
+  }
+
+  renderAnimationTimeline();
+}
+
+function createTimelineEntry(designName) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    designName,
+    repeat: 1,
+  };
+}
+
+function renderAnimationTimeline() {
+  elements.animationLibrary.innerHTML = "";
+  updateTimelineSummary();
+
+  if (!animationTimeline.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Agrega frames para construir tu animación.";
+    elements.animationLibrary.appendChild(empty);
+    updateAnimationSendState();
+    renderAnimationPreview();
+    return;
+  }
+
+  for (let timelineIndex = 0; timelineIndex < animationTimeline.length; timelineIndex += 1) {
+    const entry = animationTimeline[timelineIndex];
+    const design = libraryCache.find((item) => item.name === entry.designName);
+    if (!design) continue;
+
+    const item = document.createElement("article");
+    item.className = "animation-item";
+    item.draggable = true;
+    item.dataset.entryId = entry.id;
+
+    const index = document.createElement("span");
+    index.className = "timeline-index";
+    index.textContent = String(timelineIndex + 1).padStart(2, "0");
+
+    const content = document.createElement("div");
+    content.className = "animation-item-content";
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 360;
+    canvas.height = 72;
+    renderLedCanvas(canvas, designToPixels(design));
+
+    const meta = document.createElement("div");
+    meta.className = "animation-item-meta";
+
+    const name = document.createElement("span");
+    name.textContent = design.name;
+
+    const repeatControl = document.createElement("div");
+    repeatControl.className = "repeat-stepper";
+
+    const decreaseRepeat = document.createElement("button");
+    decreaseRepeat.type = "button";
+    decreaseRepeat.textContent = "-";
+    decreaseRepeat.disabled = entry.repeat <= 1;
+    decreaseRepeat.addEventListener("click", () => {
+      entry.repeat = Math.max(1, entry.repeat - 1);
+      renderAnimationTimeline();
+    });
+
+    const repeatValue = document.createElement("strong");
+    repeatValue.textContent = `${entry.repeat}x`;
+
+    const increaseRepeat = document.createElement("button");
+    increaseRepeat.type = "button";
+    increaseRepeat.textContent = "+";
+    increaseRepeat.disabled = entry.repeat >= 20;
+    increaseRepeat.addEventListener("click", () => {
+      entry.repeat = Math.min(20, entry.repeat + 1);
+      renderAnimationTimeline();
+    });
+
+    repeatControl.appendChild(decreaseRepeat);
+    repeatControl.appendChild(repeatValue);
+    repeatControl.appendChild(increaseRepeat);
+
+    const actions = document.createElement("div");
+    actions.className = "timeline-actions";
+
+    const duplicate = document.createElement("button");
+    duplicate.type = "button";
+    duplicate.textContent = "Duplicar";
+    duplicate.addEventListener("click", () => {
+      animationTimeline.splice(timelineIndex + 1, 0, {
+        ...entry,
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      });
+      renderAnimationTimeline();
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Quitar";
+    remove.addEventListener("click", () => {
+      animationTimeline = animationTimeline.filter((itemEntry) => itemEntry.id !== entry.id);
+      renderAnimationTimeline();
+    });
+
+    actions.appendChild(duplicate);
+    actions.appendChild(remove);
+    meta.appendChild(name);
+    meta.appendChild(repeatControl);
+    content.appendChild(canvas);
+    content.appendChild(meta);
+    content.appendChild(actions);
+    item.appendChild(index);
+    item.appendChild(content);
+    item.addEventListener("dragstart", (event) => {
+      item.classList.add("is-dragging");
+      if (!event.dataTransfer) return;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", entry.id);
+    });
+    item.addEventListener("dragend", () => {
+      item.classList.remove("is-dragging");
+    });
+    item.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      item.classList.add("is-drop-target");
+    });
+    item.addEventListener("dragleave", () => {
+      item.classList.remove("is-drop-target");
+    });
+    item.addEventListener("drop", (event) => {
+      event.preventDefault();
+      item.classList.remove("is-drop-target");
+      const draggedId = event.dataTransfer ? event.dataTransfer.getData("text/plain") : "";
+      reorderTimelineEntry(draggedId, entry.id);
+    });
+    elements.animationLibrary.appendChild(item);
+  }
+
+  updateAnimationSendState();
+  renderAnimationPreview();
+}
+
+function reorderTimelineEntry(draggedId, targetId) {
+  if (!draggedId || draggedId === targetId) return;
+  const draggedIndex = animationTimeline.findIndex((entry) => entry.id === draggedId);
+  const targetIndex = animationTimeline.findIndex((entry) => entry.id === targetId);
+  if (draggedIndex < 0 || targetIndex < 0) return;
+  const [draggedEntry] = animationTimeline.splice(draggedIndex, 1);
+  const insertIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  animationTimeline.splice(insertIndex, 0, draggedEntry);
+  renderAnimationTimeline();
+}
+
+function getSelectedAnimationDesigns() {
+  const sequence = [];
+  for (const entry of animationTimeline) {
+    const design = libraryCache.find((item) => item.name === entry.designName);
+    if (!design) continue;
+    const repeatCount = Math.max(1, Math.min(20, entry.repeat || 1));
+    for (let repeatIndex = 0; repeatIndex < repeatCount; repeatIndex += 1) {
+      sequence.push(design);
+    }
+  }
+  return sequence;
+}
+
 function validateDesign(design) {
   if (!design || design.width !== DISPLAY_WIDTH || design.height !== DISPLAY_HEIGHT || !Array.isArray(design.cells)) {
     throw new Error("El diseño no tiene formato 36x12 válido");
   }
   if (design.cells.length !== CELL_COUNT) {
     throw new Error(`El diseño debe tener ${CELL_COUNT} celdas`);
+  }
+}
+
+function validateAnimation(animation) {
+  if (!animation || typeof animation.name !== "string" || !animation.name.trim()) {
+    throw new Error("Ponle un nombre a la animación antes de guardar");
+  }
+  if (!Array.isArray(animation.frames) || animation.frames.length === 0) {
+    throw new Error("Agrega al menos un frame antes de guardar la animación");
+  }
+  if (!Number.isInteger(animation.manyModeByte) || animation.manyModeByte < 0 || animation.manyModeByte > 255) {
+    throw new Error("El perfil MANY de la animación no es válido");
+  }
+  for (const frame of animation.frames) {
+    if (!frame || typeof frame.designName !== "string" || !frame.designName.trim()) {
+      throw new Error("Cada frame debe referenciar un diseño guardado");
+    }
+    if (!Number.isInteger(frame.repeat) || frame.repeat < 1 || frame.repeat > 20) {
+      throw new Error("Cada repetición debe estar entre 1 y 20");
+    }
   }
 }
 
@@ -608,6 +1210,17 @@ function loadDesignIntoGrid(design) {
   renderGrid();
 }
 
+function loadAnimationIntoTimeline(animation) {
+  validateAnimation(animation);
+  elements.animationName.value = animation.name || "";
+  animationTimeline = animation.frames.map((frame) => ({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    designName: frame.designName,
+    repeat: Math.max(1, Math.min(20, frame.repeat || 1)),
+  }));
+  renderAnimationTimeline();
+}
+
 async function saveCurrentDesign() {
   const name = elements.designName.value.trim();
   if (!name) throw new Error("Ponle un nombre al diseño antes de guardar");
@@ -618,6 +1231,18 @@ async function saveCurrentDesign() {
   log(`Diseño guardado: ${name}`);
 }
 
+async function saveCurrentAnimation() {
+  const name = elements.animationName.value.trim();
+  const animation = createAnimation(name);
+  validateAnimation(animation);
+  await saveAnimationToLibrary(animation);
+  await renderSavedAnimations(name);
+  if (!elements.libraryView.classList.contains("is-hidden")) {
+    await renderActiveLibrary();
+  }
+  log(`Animación guardada: ${name}`);
+}
+
 async function getSelectedDesign() {
   const name = elements.savedDesigns.value;
   const designs = libraryCache.length ? libraryCache : await readLibrary();
@@ -626,10 +1251,24 @@ async function getSelectedDesign() {
   return design;
 }
 
+async function getSelectedAnimation() {
+  const name = elements.savedAnimations.value;
+  const animations = animationCache.length ? animationCache : await readAnimations();
+  const animation = animations.find((item) => item.name === name);
+  if (!animation) throw new Error("Selecciona una animación guardada");
+  return animation;
+}
+
 async function loadSelectedDesign() {
   const design = await getSelectedDesign();
   loadDesignIntoGrid(design);
   log(`Diseño cargado: ${design.name}`);
+}
+
+async function loadSelectedAnimation() {
+  const animation = await getSelectedAnimation();
+  loadAnimationIntoTimeline(animation);
+  log(`Animación cargada: ${animation.name}`);
 }
 
 async function deleteSelectedDesign() {
@@ -638,6 +1277,17 @@ async function deleteSelectedDesign() {
   await deleteDesignFromLibrary(name);
   await renderLibrary();
   log(`Diseño borrado: ${name}`);
+}
+
+async function deleteSelectedAnimation() {
+  const name = elements.savedAnimations.value;
+  if (!name) throw new Error("Selecciona una animación guardada");
+  await deleteAnimationFromLibrary(name);
+  await renderSavedAnimations();
+  if (!elements.libraryView.classList.contains("is-hidden")) {
+    await renderActiveLibrary();
+  }
+  log(`Animación borrada: ${name}`);
 }
 
 async function exportSelectedDesign() {
@@ -969,6 +1619,45 @@ async function uploadFrame(frame) {
   }
 }
 
+async function sendCommandAndWait(command, args, expectedBodyHex, label) {
+  const acknowledgement = waitForNotification();
+  await sendCommand(command, args);
+  const response = await acknowledgement;
+  if (!response || response.bodyHex !== expectedBodyHex) {
+    throw new Error(`Se esperaba ${label}; llegó ${(response && response.bodyHex) || "sin respuesta"}`);
+  }
+}
+
+async function uploadAnimation(designs) {
+  if (!isConnected()) {
+    openConnectionModal();
+    return;
+  }
+  if (designs.length < 2) {
+    throw new Error("Selecciona al menos dos diseños para crear una animación");
+  }
+  if (designs.length > 255) {
+    throw new Error("La animación no puede tener más de 255 frames");
+  }
+
+  const manyModeByte = DEFAULT_MANY_MODE_BYTE;
+  elements.status.textContent = `Preparando animación: ${designs.length} frames...`;
+  await sendCommandAndWait("MANY", [designs.length, manyModeByte], "4d414e594f4b", "MANYOK");
+  log(`Animación: MANY count=${designs.length} mode=0x${manyModeByte.toString(16).padStart(2, "0")}`);
+
+  for (let index = 0; index < designs.length; index += 1) {
+    const design = designs[index];
+    const frame = encodeFrame(orientPixels(designToPixels(design)));
+    elements.status.textContent = `Subiendo frame ${index + 1}/${designs.length}: ${design.name}`;
+    await uploadFrame(frame);
+  }
+
+  elements.status.textContent = "Cerrando animación...";
+  await sendCommandAndWait("MANCPOK", [], "4d414e43504f4b", "MANCPOK");
+  elements.status.textContent = `Animación creada: ${designs.length} frames`;
+  log(`Animación custom enviada: ${designs.map((design) => design.name).join(" -> ")}`);
+}
+
 async function onImageSelected(event) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
@@ -1011,19 +1700,47 @@ async function sendDesign(design) {
   log(`Diseño enviado desde biblioteca rápida: ${design.name}`);
 }
 
+async function sendSelectedAnimation() {
+  const designs = getSelectedAnimationDesigns();
+  elements.sendAnimation.disabled = true;
+  elements.sendAnimation.textContent = "Enviando animación...";
+  try {
+    await uploadAnimation(designs);
+  } finally {
+    elements.sendAnimation.innerHTML = '<span class="icon">▶</span> Enviar animación';
+    updateAnimationSendState();
+  }
+}
+
 buildGrid();
 renderPreview([]);
+updateBrightnessLabel();
 renderLibrary().catch((error) => log(`ERROR ${error.message}`));
+renderSavedAnimations().catch((error) => log(`ERROR ${error.message}`));
 updateHistoryButtons();
 
 elements.connect.addEventListener("click", handleConnectRequest);
 elements.modalConnect.addEventListener("click", handleConnectRequest);
+elements.ledBrightness.addEventListener("input", updateBrightnessLabel);
+elements.ledBrightness.addEventListener("change", () => {
+  setLedBrightness().catch((error) => {
+    elements.status.textContent = "No se pudo cambiar el brillo";
+    log(`ERROR ${error.message}`);
+  });
+});
 elements.closeConnectionModal.addEventListener("click", closeConnectionModal);
 elements.connectionModal.addEventListener("click", (event) => {
   if (event.target === elements.connectionModal) closeConnectionModal();
 });
 elements.showEditor.addEventListener("click", () => showView("editor"));
 elements.showLibrary.addEventListener("click", () => showView("library"));
+elements.showAnimation.addEventListener("click", () => showView("animation"));
+elements.showStaticLibrary.addEventListener("click", () => {
+  setLibraryMode("static").catch((error) => log(`ERROR ${error.message}`));
+});
+elements.showAnimationLibrary.addEventListener("click", () => {
+  setLibraryMode("animations").catch((error) => log(`ERROR ${error.message}`));
+});
 elements.imageFile.addEventListener("change", (event) => onImageSelected(event).catch((error) => log(`ERROR ${error.message}`)));
 elements.importMode.addEventListener("change", rebuildImagePixels);
 elements.brightnessThreshold.addEventListener("input", rebuildImagePixels);
@@ -1065,6 +1782,32 @@ elements.importDesignFile.addEventListener("change", (event) => {
   const file = event.target.files && event.target.files[0];
   if (file) importDesignFile(file);
   event.target.value = "";
+});
+elements.clearAnimation.addEventListener("click", () => {
+  animationTimeline = [];
+  renderAnimationTimeline();
+});
+elements.saveAnimation.addEventListener("click", () => {
+  saveCurrentAnimation().catch((error) => {
+    log(`ERROR ${error.message}`);
+  });
+});
+elements.loadAnimation.addEventListener("click", () => {
+  loadSelectedAnimation().catch((error) => {
+    log(`ERROR ${error.message}`);
+  });
+});
+elements.deleteAnimation.addEventListener("click", () => {
+  deleteSelectedAnimation().catch((error) => {
+    log(`ERROR ${error.message}`);
+  });
+});
+elements.sendAnimation.addEventListener("click", () => {
+  sendSelectedAnimation().catch((error) => {
+    elements.status.textContent = "La animación falló";
+    log(`ERROR ${error.message}`);
+    updateAnimationSendState();
+  });
 });
 window.addEventListener("pointerup", () => {
   isPointerDown = false;

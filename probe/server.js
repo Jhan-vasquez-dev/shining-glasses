@@ -13,6 +13,7 @@ const KEY = Buffer.from("32672f7974ad43451d9c6c894a0e8764", "hex");
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const DESIGNS_TABLE = process.env.DESIGNS_TABLE || "shining_glasses_designs";
+const ANIMATIONS_TABLE = process.env.ANIMATIONS_TABLE || "shining_glasses_animations";
 const LIBRARY_ID = process.env.LIBRARY_ID || "default";
 
 const contentTypes = {
@@ -84,12 +85,43 @@ function normalizeDesign(row) {
   };
 }
 
+function normalizeAnimation(row) {
+  return {
+    id: row.id,
+    version: 1,
+    name: row.name,
+    manyModeByte: row.many_mode_byte,
+    frames: row.frames,
+    savedAt: row.saved_at || row.updated_at,
+  };
+}
+
 function validateDesign(design) {
   if (!design || typeof design.name !== "string" || !design.name.trim()) {
     throw new Error("Design name is required");
   }
   if (design.width !== 36 || design.height !== 12 || !Array.isArray(design.cells) || design.cells.length !== 432) {
     throw new Error("Design must be a 36x12 grid with 432 cells");
+  }
+}
+
+function validateAnimation(animation) {
+  if (!animation || typeof animation.name !== "string" || !animation.name.trim()) {
+    throw new Error("Animation name is required");
+  }
+  if (!Number.isInteger(animation.manyModeByte) || animation.manyModeByte < 0 || animation.manyModeByte > 255) {
+    throw new Error("Animation MANY mode must be between 0 and 255");
+  }
+  if (!Array.isArray(animation.frames) || animation.frames.length === 0) {
+    throw new Error("Animation must contain at least one frame");
+  }
+  for (const frame of animation.frames) {
+    if (!frame || typeof frame.designName !== "string" || !frame.designName.trim()) {
+      throw new Error("Each animation frame must reference a design name");
+    }
+    if (!Number.isInteger(frame.repeat) || frame.repeat < 1 || frame.repeat > 20) {
+      throw new Error("Each animation frame repeat must be between 1 and 20");
+    }
   }
 }
 
@@ -216,6 +248,72 @@ function handleDesignsApi(request, response) {
   sendJson(response, 404, { error: "API route not found" });
 }
 
+function handleAnimationsApi(request, response) {
+  if (!isSharedLibraryConfigured()) {
+    sendJson(response, 501, { error: "Shared library is not configured" });
+    return;
+  }
+
+  if (request.method === "GET" && request.url === "/api/animations") {
+    const libraryFilter = encodedFilterValue(`eq.${LIBRARY_ID}`);
+    const requestPath = `${ANIMATIONS_TABLE}?library_id=${libraryFilter}&select=id,name,many_mode_byte,frames,saved_at,updated_at&order=name.asc`;
+    supabaseRequest("GET", requestPath, null, (error, rows) => {
+      if (error) {
+        sendJson(response, error.statusCode || 500, { error: error.message });
+        return;
+      }
+      sendJson(response, 200, { animations: rows.map(normalizeAnimation) });
+    });
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/api/animations") {
+    readJson(request, (error, animation) => {
+      try {
+        if (error) throw error;
+        validateAnimation(animation);
+      } catch (validationError) {
+        sendJson(response, 400, { error: validationError.message });
+        return;
+      }
+
+      const row = {
+        library_id: LIBRARY_ID,
+        name: animation.name.trim(),
+        many_mode_byte: animation.manyModeByte,
+        frames: animation.frames,
+        saved_at: animation.savedAt || new Date().toISOString(),
+      };
+      const requestPath = `${ANIMATIONS_TABLE}?on_conflict=library_id,name`;
+      supabaseRequest("POST", requestPath, row, (supabaseError, rows) => {
+        if (supabaseError) {
+          sendJson(response, supabaseError.statusCode || 500, { error: supabaseError.message });
+          return;
+        }
+        sendJson(response, 200, { animation: normalizeAnimation(rows[0]) });
+      });
+    });
+    return;
+  }
+
+  if (request.method === "DELETE" && request.url.indexOf("/api/animations/") === 0) {
+    const name = decodeURIComponent(request.url.slice("/api/animations/".length));
+    const libraryFilter = encodedFilterValue(`eq.${LIBRARY_ID}`);
+    const nameFilter = encodedFilterValue(`eq.${name}`);
+    const requestPath = `${ANIMATIONS_TABLE}?library_id=${libraryFilter}&name=${nameFilter}`;
+    supabaseRequest("DELETE", requestPath, null, (error) => {
+      if (error) {
+        sendJson(response, error.statusCode || 500, { error: error.message });
+        return;
+      }
+      sendJson(response, 200, { ok: true });
+    });
+    return;
+  }
+
+  sendJson(response, 404, { error: "API route not found" });
+}
+
 function sendStaticFile(request, response) {
   const pathname = new URL(request.url, `http://${HOST}:${PORT}`).pathname;
   const relative = pathname === "/" ? "index.html" : pathname.slice(1);
@@ -242,6 +340,11 @@ function sendStaticFile(request, response) {
 const server = http.createServer((request, response) => {
   if (request.url === "/api/designs" || request.url.indexOf("/api/designs/") === 0) {
     handleDesignsApi(request, response);
+    return;
+  }
+
+  if (request.url === "/api/animations" || request.url.indexOf("/api/animations/") === 0) {
+    handleAnimationsApi(request, response);
     return;
   }
 
