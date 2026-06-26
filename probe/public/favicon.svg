@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Glow Remote">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="45%" r="62%">
+      <stop offset="0%" stop-color="#00e6df" stop-opacity=".5"/>
+      <stop offset="58%" stop-color="#8000ff" stop-opacity=".18"/>
+      <stop offset="100%" stop-color="#050b0c"/>
+    </radialGradient>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#050b0c"/>
+  <rect x="5" y="5" width="54" height="54" rx="14" fill="url(#glow)" stroke="#00e6df" stroke-opacity=".32"/>
+  <g filter="url(#softGlow)">
+    <circle cx="20" cy="23" r="4" fill="#00e6df"/>
+    <circle cx="32" cy="23" r="4" fill="#123133"/>
+    <circle cx="44" cy="23" r="4" fill="#00e6df"/>
+    <circle cx="20" cy="41" r="4" fill="#123133"/>
+    <circle cx="32" cy="41" r="4" fill="#00e6df"/>
+    <circle cx="44" cy="41" r="4" fill="#123133"/>
+  </g>
+  <path d="M15 32h34" stroke="#ff55d8" stroke-width="3" stroke-linecap="round" opacity=".85"/>
+</svg>
